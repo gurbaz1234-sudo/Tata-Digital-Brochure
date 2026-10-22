@@ -209,6 +209,15 @@ html:not(.jsok):not(:has(.reel:target)) .pill[data-sec="overview"]{background:#f
 html:not(.jsok),html:not(.jsok) body{height:100%;overflow:hidden;scroll-snap-type:none}
 html:not(.jsok) .app{position:fixed;left:0;right:0;top:0;bottom:0;margin:0 auto;width:var(--appw);max-width:100%;overflow-x:hidden;overflow-y:scroll;-webkit-overflow-scrolling:touch;scroll-snap-type:y mandatory;overscroll-behavior-y:contain}
 html:not(.jsok) .app > .reel{height:100%;scroll-snap-align:start;scroll-snap-stop:always}
+
+/* with scripts on: the page itself never scrolls, a fixed full-screen panel does (keeps phone browser bars still, no pull-to-refresh, pages always exactly one screen) */
+html.jsok,html.jsok body{height:100%;overflow:hidden;overscroll-behavior:none;scroll-snap-type:none}
+html.jsok .app{position:fixed;left:0;right:0;top:0;bottom:0;margin:0 auto;width:var(--appw);max-width:100%;overflow:hidden;overscroll-behavior:none}
+html.jsok .app > .reel{height:100%!important}
+html.vhfix .app{height:var(--VH)}
+.tapplay{display:none;position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;background:rgba(0,0,0,.45);border:2px solid rgba(255,255,255,.85);z-index:5;pointer-events:none}
+.tapplay::after{content:'';position:absolute;left:28px;top:21px;border-style:solid;border-width:15px 0 15px 24px;border-color:transparent transparent transparent #fff}
+.blocked .tapplay{display:block}
 /* ---------- viewers with broken screen-height units: pages sized in measured pixels ---------- */
 .vhfix{--vhs:var(--VH)}
 .vhfix .reel{height:var(--VH)!important}
@@ -550,9 +559,10 @@ html:not(.jsok) .app > .reel{height:100%;scroll-snap-align:start;scroll-snap-sto
     players.push(P);
     if (!v) return;
     if (reel.id !== 'overview') { try { v.pause(); v.currentTime = 0; } catch (e) {} }   // only the opening film may start on its own
-    v.addEventListener('playing', function(){ box.classList.add('live'); if (key === 'design') box.classList.add('synced'); });
+    v.addEventListener('playing', function(){ box.classList.remove('blocked'); box.classList.add('live'); if (key === 'design') box.classList.add('synced'); });
+    var tp = document.createElement('div'); tp.className = 'tapplay'; tp.setAttribute('aria-hidden', 'true'); box.appendChild(tp);
     v.addEventListener('ended', function(){ P.ended = true; box.classList.add('ended'); });
-    v.addEventListener('click', function(){ if (P.ended) { replayFilm(P); return; } if (v.paused) { var pr = v.play(); if (pr && pr.catch) pr.catch(function(){}); } else v.pause(); });
+    v.addEventListener('click', function(){ if (P.ended) { replayFilm(P); return; } if (Date.now() - (P.kicked || 0) < 700) return; if (v.paused) { var pr = v.play(); if (pr && pr.catch) pr.catch(function(){}); } else v.pause(); });
   });
   function restartAnim(P){
     // restart the play-once animation (used when the browser cannot play the video)
@@ -567,8 +577,11 @@ html:not(.jsok) .app > .reel{height:100%;scroll-snap-align:start;scroll-snap-sto
     if (P.ended) return;                       // played once already: hold the last frame
     var v = P.video;
     var pr = v.play();
-    if (pr && pr.catch) pr.catch(function(err){ });
+    if (pr && pr.catch) pr.catch(function(err){ if (P.active && v.paused) P.box.classList.add('blocked'); });   // e.g. iPhone Low Power Mode or Android data saver: wait for a tap
   }
+  // any tap or swipe counts as permission to play: start the film on screen if the phone held it back
+  function kick(){ players.forEach(function(P){ if (P.active && P.video && P.video.paused && !P.ended) { P.kicked = Date.now(); var pr = P.video.play(); if (pr && pr.catch) pr.catch(function(){}); } }); }
+  ['touchend', 'click', 'keydown'].forEach(function(t){ document.addEventListener(t, kick, { passive: true, capture: true }); });
   function replayFilm(P){
     P.box.classList.remove('ended');
     if (P.ok && P.video) {
@@ -625,8 +638,9 @@ html:not(.jsok) .app > .reel{height:100%;scroll-snap-align:start;scroll-snap-sto
     var hh = top.offsetHeight, probe = hh + (viewH() - hh) * 0.45;
     for (var i = 0; i < reels.length; i++) { var b = reels[i].getBoundingClientRect(); if (b.top <= probe && b.bottom > probe) { setActive(reels[i]); return; } }
   }
+  var SC = document.querySelector('.app');   // the page scroller: a fixed panel, so the browser bars never collapse and pages stay exactly one screen tall
   var ticking = false;
-  window.addEventListener('scroll', function(){ if (!ticking) { ticking = true; requestAnimationFrame(function(){ ticking = false; pick(); }); } }, { passive: true });
+  SC.addEventListener('scroll', function(){ if (!ticking) { ticking = true; requestAnimationFrame(function(){ ticking = false; pick(); }); } }, { passive: true });
   window.addEventListener('resize', pick);
   var edge = function(){ pillRow.classList.toggle('at-end', pillRow.scrollLeft + pillRow.clientWidth >= pillRow.scrollWidth - 4); };
   pillRow.addEventListener('scroll', edge, { passive: true }); edge();
@@ -638,26 +652,26 @@ html:not(.jsok) .app > .reel{height:100%;scroll-snap-align:start;scroll-snap-sto
   var animating = false;
   function animateTo(y, ms, easeOut){
     cancelAnimationFrame(anim);
-    var from = window.pageYOffset, d = y - from, t0 = 0;
-    if (reduce || Math.abs(d) < 1) { window.scrollTo(0, y); animating = false; pick(); return; }
+    var from = SC.scrollTop, d = y - from, t0 = 0;
+    if (reduce || Math.abs(d) < 1) { SC.scrollTop = y; animating = false; pick(); return; }
     ms = ms || 380; animating = true;
     function step(now){
       if (!t0) t0 = now;
       var k = Math.min(1, (now - t0) / ms);
       var e = easeOut ? 1 - Math.pow(1 - k, 3) : (k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
-      window.scrollTo(0, from + d * e);
+      SC.scrollTop = from + d * e;
       if (k < 1) anim = requestAnimationFrame(step); else { animating = false; pick(); }
     }
     anim = requestAnimationFrame(step);
   }
-  function currentIndex(){ return nearestIndex(window.pageYOffset); }
+  function currentIndex(){ return nearestIndex(SC.scrollTop); }
   function goIndex(i, ms){ var t = pageTops(); i = Math.max(0, Math.min(t.length - 1, i)); animateTo(t[i], ms); }
   var tStart = null;
   function skipTarget(el){ return !!(el && el.closest && el.closest('#top, input, .dial, .card .range')); }
   document.addEventListener('touchstart', function(e){
     if (e.touches.length !== 1 || skipTarget(e.target)) { tStart = null; return; }
     cancelAnimationFrame(anim);
-    var y = window.pageYOffset;
+    var y = SC.scrollTop;
     tStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), scroll: y, idx: nearestIndex(y), axis: null, lastY: e.touches[0].clientY, lastT: Date.now(), vy: 0 };
   }, { passive: true });
   document.addEventListener('touchmove', function(e){
@@ -669,7 +683,7 @@ html:not(.jsok) .app > .reel{height:100%;scroll-snap-align:start;scroll-snap-sto
     var tops = pageTops(), i = tStart.idx;
     var lo = tops[Math.max(0, i - 1)], hi = tops[Math.min(tops.length - 1, i + 1)];
     var y = Math.max(lo, Math.min(hi, tStart.scroll - dy));
-    window.scrollTo(0, y);
+    SC.scrollTop = y;
     var now = Date.now(); if (now > tStart.lastT) { tStart.vy = (e.touches[0].clientY - tStart.lastY) / (now - tStart.lastT); tStart.lastY = e.touches[0].clientY; tStart.lastT = now; }
   }, { passive: false });
   function touchEnd(e){
@@ -710,18 +724,18 @@ html:not(.jsok) .app > .reel{height:100%;scroll-snap-align:start;scroll-snap-sto
   });
   // safety net (scrollbar drags, find-in-page, browsers that ignore the handlers above): settle on the nearest whole page
   var settleTimer = 0;
-  window.addEventListener('scroll', function(){
+  SC.addEventListener('scroll', function(){
     if (animating || tStart) return;
     clearTimeout(settleTimer);
     settleTimer = setTimeout(function(){
       if (animating || tStart) return;
-      var y = window.pageYOffset, t = pageTops()[nearestIndex(y)];
+      var y = SC.scrollTop, t = pageTops()[nearestIndex(y)];
       if (Math.abs(t - y) > 1) animateTo(t, 260, true);
     }, 160);
   }, { passive: true });
   // keep a page aligned after rotation / browser-bar changes
   var realign = 0;
-  window.addEventListener('resize', function(){ clearTimeout(realign); realign = setTimeout(function(){ window.scrollTo(0, pageTops()[nearestIndex(window.pageYOffset)]); pick(); }, 150); });
+  window.addEventListener('resize', function(){ clearTimeout(realign); realign = setTimeout(function(){ SC.scrollTop = pageTops()[nearestIndex(SC.scrollTop)]; pick(); }, 150); });
   // in-page links: scroll without changing the address bar
   $$('a[href^="#"]').forEach(function(a){
     a.addEventListener('click', function(e){
@@ -916,7 +930,8 @@ html:not(.jsok) .app > .reel{height:100%;scroll-snap-align:start;scroll-snap-sto
     go.classList.add('show');
   })();
   /* ---------- offline: keep a copy on the phone after the first visit ---------- */
-  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) { try { navigator.serviceWorker.register('sw.js'); } catch (e) {} }
+  // register the offline copy a few seconds after the page has loaded, so the first films are not competing with the background download
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) { var regSW = function(){ setTimeout(function(){ try { navigator.serviceWorker.register('sw.js').catch(function(){}); } catch (e) {} }, 3000); }; if (document.readyState === 'complete') regSW(); else window.addEventListener('load', regSW); }
   root.classList.add('js'); root.classList.add('pager');
   pick();
 })();
