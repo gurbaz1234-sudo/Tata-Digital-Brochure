@@ -1,5 +1,5 @@
 /* Sierra.ev brochure: keeps everything on the phone so it opens offline after the first visit */
-const CACHE = 'sierra-ev-brochure-v9';
+const CACHE = 'sierra-ev-brochure-v10';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const FILMS = ['./hero.mp4', './design.mp4', './interior.mp4', './summon.mp4', './autopark.mp4', './slope.mp4'];
 // store the page first, then each film on its own (one slow or failed film never blocks the rest)
